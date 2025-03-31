@@ -27,4 +27,19 @@ module.exports = function(app) {
       }
     })
   );
+
+  app.use(
+    '/api/v3',
+    createProxyMiddleware({
+      target: 'https://testnet.binance.vision',
+      changeOrigin: true,
+      secure: false,
+      onProxyReq: function(proxyReq, req, res) {
+        // API呼び出し時にヘッダーを維持
+        if (req.headers['x-mbx-apikey']) {
+          proxyReq.setHeader('X-MBX-APIKEY', req.headers['x-mbx-apikey']);
+        }
+      }
+    })
+  );
 }; 

@@ -5,30 +5,34 @@ import { binanceService } from '../services/binance';
 
 const SYSTEM_RUNNING_KEY = 'system_running';
 const LAST_SYNC_TIME_KEY = 'last_sync_time';
+const ACTIVE_GRIDS_KEY = 'active_grids';
 
 const SystemContext = createContext(null);
 
 export const SystemProvider = ({ children }) => {
-  // 状態の初期化
   const [isRunning, setIsRunning] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [balanceData, setBalanceData] = useState({});
   const [error, setError] = useState(null);
   const [activeGrids, setActiveGrids] = useState([]);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [totalAssets, setTotalAssets] = useState(0);
+  const [updateInterval, setUpdateInterval] = useState(null);
   
-  // API Context から情報を取得
   const { isConnected } = useApi();
 
   // 初期化時に保存された状態を読み込む
   useEffect(() => {
     const initializeSystem = async () => {
       try {
+        console.log('システム初期化開始');
         const savedStatus = localStorage.getItem(SYSTEM_RUNNING_KEY) === 'true';
         const savedTime = localStorage.getItem(LAST_SYNC_TIME_KEY);
+        const savedGrids = JSON.parse(localStorage.getItem(ACTIVE_GRIDS_KEY) || '[]');
         
-        // APIに接続されていない場合は稼働状態をfalseに設定
         const shouldRun = savedStatus && isConnected;
+        console.log('初期状態:', { savedStatus, isConnected, shouldRun });
         
         setIsRunning(shouldRun);
         localStorage.setItem(SYSTEM_RUNNING_KEY, shouldRun.toString());
@@ -37,10 +41,14 @@ export const SystemProvider = ({ children }) => {
           setLastSyncTime(new Date(parseInt(savedTime, 10)));
         }
         
-        // モックのアクティブグリッド
-        setActiveGrids(getInitialActiveGrids());
+        setActiveGrids(savedGrids.length > 0 ? savedGrids : getInitialActiveGrids());
+        
+        if (shouldRun) {
+          await fetchBalances();
+        }
         
         setIsInitialized(true);
+        console.log('システム初期化完了');
       } catch (err) {
         console.error('初期化エラー:', err);
         setError('システムの初期化に失敗しました');
@@ -50,7 +58,6 @@ export const SystemProvider = ({ children }) => {
     initializeSystem();
   }, [isConnected]);
 
-  // モックのアクティブグリッド初期データ
   const getInitialActiveGrids = () => [
     {
       id: 'grid-1',
@@ -63,22 +70,91 @@ export const SystemProvider = ({ children }) => {
       totalProfit: 25.45,
       totalLoss: 2.35,
       gridCount: 10
-    },
-    {
-      id: 'grid-2',
-      symbol: 'ETH/USDT',
-      status: 'active',
-      upperPrice: 2500,
-      lowerPrice: 2200,
-      totalInvestment: 500,
-      profitRate: 0.012,
-      totalProfit: 6.12,
-      totalLoss: 0.98,
-      gridCount: 6
     }
   ];
 
-  // 残高情報の取得
+  const createGrid = useCallback((gridData) => {
+    try {
+      console.log('グリッド作成開始:', gridData);
+      
+      // 新しいグリッドのID生成
+      const newGrid = {
+        id: `grid-${Date.now()}`,
+        symbol: 'BTC/USDT', // BTCに固定
+        status: 'active',
+        ...gridData
+      };
+
+      setActiveGrids(prevGrids => {
+        const updatedGrids = [...prevGrids, newGrid];
+        // ローカルストレージに保存
+        localStorage.setItem(ACTIVE_GRIDS_KEY, JSON.stringify(updatedGrids));
+        return updatedGrids;
+      });
+
+      message.success('グリッドを作成しました');
+      console.log('グリッド作成完了:', newGrid);
+      return true;
+    } catch (err) {
+      console.error('グリッド作成エラー:', err);
+      message.error('グリッドの作成に失敗しました');
+      return false;
+    }
+  }, []);
+
+  // グリッド削除機能を追加
+  const deleteGrid = useCallback((gridId) => {
+    try {
+      console.log('グリッド削除開始:', gridId);
+      
+      setActiveGrids(prevGrids => {
+        const updatedGrids = prevGrids.filter(grid => grid.id !== gridId);
+        // ローカルストレージに保存
+        localStorage.setItem(ACTIVE_GRIDS_KEY, JSON.stringify(updatedGrids));
+        return updatedGrids;
+      });
+
+      message.success('グリッドを削除しました');
+      console.log('グリッド削除完了:', gridId);
+      return true;
+    } catch (err) {
+      console.error('グリッド削除エラー:', err);
+      message.error('グリッドの削除に失敗しました');
+      return false;
+    }
+  }, []);
+
+  // グリッド編集機能を追加
+  const updateGrid = useCallback((gridId, updatedData) => {
+    try {
+      console.log('グリッド編集開始:', { gridId, updatedData });
+      
+      setActiveGrids(prevGrids => {
+        const updatedGrids = prevGrids.map(grid => {
+          if (grid.id === gridId) {
+            return {
+              ...grid,
+              ...updatedData,
+              symbol: 'BTC/USDT', // BTCに固定
+            };
+          }
+          return grid;
+        });
+        // ローカルストレージに保存
+        localStorage.setItem(ACTIVE_GRIDS_KEY, JSON.stringify(updatedGrids));
+        return updatedGrids;
+      });
+
+      message.success('グリッドを更新しました');
+      console.log('グリッド編集完了:', { gridId, updatedData });
+      return true;
+    } catch (err) {
+      console.error('グリッド編集エラー:', err);
+      message.error('グリッドの編集に失敗しました');
+      return false;
+    }
+  }, []);
+
   const fetchBalances = useCallback(async () => {
     if (!isConnected) {
       setError('APIに接続されていません');
@@ -86,140 +162,150 @@ export const SystemProvider = ({ children }) => {
     }
 
     try {
+      console.log('残高取得開始');
       const balance = await binanceService.getBalance();
       
       if (balance) {
-        // 残高データの整形
+        console.log('取得した残高データ:', balance);
         const formattedBalance = {};
-        Object.entries(balance).forEach(([asset, data]) => {
-          formattedBalance[asset] = {
-            total: parseFloat(data.free) + parseFloat(data.locked),
-            free: parseFloat(data.free),
-            locked: parseFloat(data.locked)
-          };
-        });
+        let totalUSDT = 0;
         
-        setBalanceData(formattedBalance);
-        const now = new Date();
-        setLastSyncTime(now);
-        localStorage.setItem(LAST_SYNC_TIME_KEY, now.getTime().toString());
-        setError(null);
+        // BTCとUSDTのみを処理
+        const targetAssets = ['BTC', 'USDT'];
+        
+        for (const asset of targetAssets) {
+          const data = balance[asset];
+          if (data) {
+            const free = parseFloat(data.free) || 0;
+            const locked = parseFloat(data.locked) || 0;
+            const total = free + locked;
+
+            formattedBalance[asset] = {
+              total,
+              free,
+              locked
+            };
+            
+            console.log(`処理中の資産: ${asset}, 合計: ${total}`);
+            
+            if (asset === 'USDT') {
+              totalUSDT += total;
+              console.log(`USDT残高を加算: ${total}`);
+            } else if (asset === 'BTC') {
+              try {
+                console.log('BTC価格取得開始');
+                const priceData = await binanceService.getPrice('BTCUSDT');
+                if (priceData && priceData.price) {
+                  const price = parseFloat(priceData.price) || 0;
+                  const assetValue = total * price;
+                  
+                  if (!isNaN(assetValue) && isFinite(assetValue)) {
+                    totalUSDT += assetValue;
+                    console.log(`BTCのUSDT換算額を加算: ${assetValue}`);
+                  } else {
+                    console.warn('BTCの換算額が無効:', assetValue);
+                  }
+                } else {
+                  console.warn('BTC価格データが無効:', priceData);
+                }
+              } catch (err) {
+                console.error('BTC価格取得エラー:', err);
+                throw new Error('BTC価格の取得に失敗しました');
+              }
+            }
+          }
+        }
+        
+        if (!isNaN(totalUSDT) && isFinite(totalUSDT)) {
+          console.log('計算された総資産額:', totalUSDT);
+          setTotalAssets(totalUSDT);
+          setBalanceData(formattedBalance);
+          
+          const now = new Date();
+          setLastSyncTime(now);
+          localStorage.setItem(LAST_SYNC_TIME_KEY, now.getTime().toString());
+          setError(null);
+          
+          console.log('残高取得完了:', {
+            formattedBalance,
+            totalAssets: totalUSDT,
+            lastSync: now
+          });
+        } else {
+          throw new Error('総資産額の計算に失敗しました');
+        }
+      } else {
+        throw new Error('残高データの取得に失敗しました');
       }
     } catch (err) {
       console.error('残高取得エラー:', err);
-      setError('残高情報の取得に失敗しました');
+      setError(`残高情報の取得に失敗しました: ${err.message}`);
     }
   }, [isConnected]);
 
-  // 定期的な残高更新
-  useEffect(() => {
-    let intervalId;
-
-    if (isRunning && isConnected) {
-      fetchBalances(); // 初回実行
-      
-      intervalId = setInterval(() => {
-        fetchBalances();
-      }, 60000); // 1分ごとに更新
-    }
-    
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [isRunning, isConnected, fetchBalances]);
-
-  // システム起動
   const startSystem = useCallback(async () => {
     try {
-      console.log("システム起動開始");
-      
       if (!isConnected) {
         throw new Error('APIに接続されていません');
       }
-      
-      // 状態を先に更新
+
+      console.log('システム起動開始');
       setIsRunning(true);
       localStorage.setItem(SYSTEM_RUNNING_KEY, 'true');
-      
-      // 初期残高取得（失敗しても続行）
-      try {
-        await fetchBalances();
-      } catch (err) {
-        console.warn('初期残高取得エラー:', err);
-      }
-      
+
+      // 初期残高取得
+      await fetchBalances();
+
+      // 定期的な残高更新を開始
+      const intervalId = setInterval(fetchBalances, 30000); // 30秒ごとに更新
+      setUpdateInterval(intervalId);
+
       message.success('システムを起動しました');
-      return true;
+      console.log('システム起動完了');
     } catch (err) {
       console.error('システム起動エラー:', err);
-      // エラー時は状態を戻す
       setIsRunning(false);
       localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
+      setError(`システムの起動に失敗しました: ${err.message}`);
       message.error(`システムの起動に失敗しました: ${err.message}`);
-      return false;
     }
   }, [isConnected, fetchBalances]);
 
-  // システム停止
   const stopSystem = useCallback(() => {
     try {
-      console.log("システム停止開始");
-      
+      console.log('システム停止開始');
       setIsRunning(false);
       localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
-      
+
+      if (updateInterval) {
+        clearInterval(updateInterval);
+        setUpdateInterval(null);
+      }
+
       message.success('システムを停止しました');
-      return true;
+      console.log('システム停止完了');
     } catch (err) {
       console.error('システム停止エラー:', err);
+      setError(`システムの停止に失敗しました: ${err.message}`);
       message.error(`システムの停止に失敗しました: ${err.message}`);
-      return false;
     }
-  }, []);
-
-  // システムの稼働状態を切り替え
-  const toggleSystemStatus = useCallback(() => {
-    console.log('トグル開始:', isRunning);
-    if (isRunning) {
-      return stopSystem();
-    } else {
-      return startSystem();
-    }
-  }, [isRunning, startSystem, stopSystem]);
-
-  // 経過時間を計算して表示する関数
-  const formatTimeSince = useCallback((date) => {
-    if (!date) return '-';
-    
-    const seconds = Math.floor((new Date() - date) / 1000);
-    
-    if (seconds < 60) return `${seconds}秒前`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}分前`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}時間前`;
-    return `${Math.floor(seconds / 86400)}日前`;
-  }, []);
+  }, [updateInterval]);
 
   const value = {
     isRunning,
     lastSyncTime,
     balanceData,
     error,
-    isConnected,
     activeGrids,
     isInitialized,
-    toggleSystemStatus,
+    totalAssets,
     startSystem,
     stopSystem,
-    formatTimeSince,
-    fetchBalances
+    fetchBalances,
+    createGrid,
+    deleteGrid,   // 削除機能を追加
+    updateGrid    // 編集機能を追加
   };
-
-  // 初期化が完了するまでローディング表示
-  if (!isInitialized) {
-    return <div>Loading...</div>;
-  }
 
   return (
     <SystemContext.Provider value={value}>

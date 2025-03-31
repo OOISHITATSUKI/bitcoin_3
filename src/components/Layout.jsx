@@ -26,6 +26,11 @@ const Layout = ({ children }) => {
       label: <Link to="/">ダッシュボード</Link>
     },
     {
+      key: '/grid-settings',
+      icon: <SettingOutlined />,
+      label: <Link to="/grid-settings">グリッド設定</Link>
+    },
+    {
       key: '/api-settings',
       icon: <SettingOutlined />,
       label: <Link to="/api-settings">API設定</Link>

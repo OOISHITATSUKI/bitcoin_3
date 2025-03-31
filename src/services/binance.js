@@ -1,133 +1,73 @@
 import axios from 'axios';
+import CryptoJS from 'crypto-js';
+
+// ストレージキーの定数
+const STORAGE_KEYS = {
+  API_KEY: 'binance_api_key',
+  SECRET_KEY: 'binance_secret_key',
+  TEST_MODE: 'binance_test_mode'
+};
 
 // ブラウザ環境でも動作するハッシュ生成関数
 const generateSignature = (queryString, apiSecret) => {
-  // 実際のプロジェクトでは、WebCrypto APIを使用することを推奨
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(apiSecret);
-  const messageData = encoder.encode(queryString);
-  
-  return crypto.subtle.sign(
-    "HMAC",
-    keyData,
-    messageData
-  ).then(signature => {
-    return Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  });
+  return CryptoJS.HmacSHA256(queryString, apiSecret).toString();
 };
 
 class BinanceService {
   constructor() {
-    this.baseUrl = 'https://testnet.binance.vision/api/v3';
+    this.baseUrl = '/api/v3'; // プロキシ用のベースURL
     this.wsUrl = 'wss://testnet.binance.vision/ws';
     this.apiKey = null;
     this.apiSecret = null;
-    this.isTestMode = true; // デフォルトでテストモード
+    this.isTestMode = true;
+    this.loadApiKeys();
   }
 
-  initialize(apiKey, apiSecret) {
+  // APIキーの検証
+  validateApiKey(apiKey) {
+    if (!apiKey) return false;
+    // APIキーは英数字のみを含む文字列
+    return /^[A-Za-z0-9]+$/.test(apiKey);
+  }
+
+  // シークレットキーの検証
+  validateSecretKey(secretKey) {
+    if (!secretKey) return false;
+    // シークレットキーは64文字の英数字
+    return /^[A-Za-z0-9]{64}$/.test(secretKey);
+  }
+
+  initialize(apiKey, apiSecret, isTestMode = true) {
+    if (!this.validateApiKey(apiKey)) {
+      throw new Error('無効なAPIキーです。英数字のみを使用してください。');
+    }
+    if (!this.validateSecretKey(apiSecret)) {
+      throw new Error('シークレットキーの形式が正しくありません。64文字の英数字である必要があります。');
+    }
+
     this.apiKey = apiKey;
     this.apiSecret = apiSecret;
-    this.isTestMode = localStorage.getItem('binance_test_mode') === 'true';
+    this.isTestMode = isTestMode;
     console.log('Binance Service initialized:', { isTestMode: this.isTestMode });
   }
 
-  // APIキーの暗号化
-  async encryptApiSecret(secret) {
+  loadApiKeys() {
     try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(secret);
-      
-      // 暗号化キーの生成
-      const key = await crypto.subtle.generateKey(
-        {
-          name: 'AES-GCM',
-          length: 256
-        },
-        true,
-        ['encrypt', 'decrypt']
-      );
+      const apiKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
+      const secretKey = localStorage.getItem(STORAGE_KEYS.SECRET_KEY);
+      const isTestMode = localStorage.getItem(STORAGE_KEYS.TEST_MODE) === 'true';
 
-      // キーのエクスポート
-      const exportedKey = await crypto.subtle.exportKey('raw', key);
-      const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedKey)));
-      
-      // 初期化ベクトル（IV）の生成
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const ivBase64 = btoa(String.fromCharCode(...iv));
+      console.log('APIキー読み込み:', { hasApiKey: !!apiKey, hasSecretKey: !!secretKey, isTestMode });
 
-      // データの暗号化
-      const encrypted = await crypto.subtle.encrypt(
-        {
-          name: 'AES-GCM',
-          iv: iv
-        },
-        key,
-        data
-      );
-
-      // 暗号化データのBase64エンコード
-      const encryptedBase64 = btoa(String.fromCharCode(...new Uint8Array(encrypted)));
-
-      return {
-        encrypted: encryptedBase64,
-        iv: ivBase64,
-        key: keyBase64
-      };
-    } catch (error) {
-      console.error('暗号化エラー:', error);
-      throw error;
-    }
-  }
-
-  // APIキーの復号化
-  async decryptApiSecret(encryptedData) {
-    try {
-      // Base64デコード
-      const encrypted = Uint8Array.from(atob(encryptedData.encrypted), c => c.charCodeAt(0));
-      const iv = Uint8Array.from(atob(encryptedData.iv), c => c.charCodeAt(0));
-      const keyData = Uint8Array.from(atob(encryptedData.key), c => c.charCodeAt(0));
-
-      // 暗号化キーのインポート
-      const key = await crypto.subtle.importKey(
-        'raw',
-        keyData,
-        {
-          name: 'AES-GCM',
-          length: 256
-        },
-        true,
-        ['decrypt']
-      );
-
-      // データの復号化
-      const decrypted = await crypto.subtle.decrypt(
-        {
-          name: 'AES-GCM',
-          iv: iv
-        },
-        key,
-        encrypted
-      );
-
-      return new TextDecoder().decode(decrypted);
-    } catch (error) {
-      console.error('復号化エラー:', error);
-      throw error;
-    }
-  }
-
-  async loadApiKeys() {
-    try {
-      const apiKey = localStorage.getItem('binance_api_key');
-      const apiSecret = localStorage.getItem('binance_secret_key_encrypted');
-      
-      if (apiKey && apiSecret) {
-        this.initialize(apiKey, apiSecret);
+      if (this.validateApiKey(apiKey) && this.validateSecretKey(secretKey)) {
+        this.apiKey = apiKey;
+        this.apiSecret = secretKey;
+        this.isTestMode = isTestMode;
+        console.log('APIキー読み込み完了');
         return true;
       }
+
+      console.log('有効なAPIキーが見つかりません');
       return false;
     } catch (error) {
       console.error('APIキー読み込みエラー:', error);
@@ -135,13 +75,62 @@ class BinanceService {
     }
   }
 
-  async saveApiKeys(apiKey, apiSecret, isTestMode = false) {
+  async saveApiKeys(apiKey, secretKey, isTestMode = true) {
     try {
-      localStorage.setItem('binance_api_key', apiKey);
-      localStorage.setItem('binance_secret_key_encrypted', apiSecret);
-      localStorage.setItem('binance_test_mode', isTestMode.toString());
-      this.initialize(apiKey, apiSecret);
-      return true;
+      console.log('APIキー保存開始:', { apiKey, isTestMode });
+
+      // APIキーの検証
+      if (!this.validateApiKey(apiKey)) {
+        throw new Error('無効なAPIキーです。英数字のみを使用してください。');
+      }
+
+      // シークレットキーの検証
+      if (!this.validateSecretKey(secretKey)) {
+        throw new Error('シークレットキーの形式が正しくありません。64文字の英数字である必要があります。');
+      }
+
+      // 接続テスト
+      const timestamp = Date.now();
+      const queryString = `timestamp=${timestamp}`;
+      const signature = generateSignature(queryString, secretKey);
+
+      try {
+        console.log('接続テスト開始');
+        const response = await axios.get(`${this.baseUrl}/account`, {
+          headers: {
+            'X-MBX-APIKEY': apiKey
+          },
+          params: {
+            timestamp,
+            signature
+          },
+          timeout: 10000
+        });
+
+        if (response.status === 200) {
+          console.log('接続テスト成功');
+          // ローカルストレージに保存
+          localStorage.setItem(STORAGE_KEYS.API_KEY, apiKey);
+          localStorage.setItem(STORAGE_KEYS.SECRET_KEY, secretKey);
+          localStorage.setItem(STORAGE_KEYS.TEST_MODE, isTestMode.toString());
+
+          // サービスの状態を更新
+          this.apiKey = apiKey;
+          this.apiSecret = secretKey;
+          this.isTestMode = isTestMode;
+
+          console.log('APIキー保存完了');
+          return true;
+        } else {
+          throw new Error('APIサーバーからの応答が無効です');
+        }
+      } catch (error) {
+        console.error('接続テストエラー:', error);
+        if (error.response) {
+          throw new Error(`API接続エラー: ${error.response.data.msg || '不明なエラー'}`);
+        }
+        throw new Error('APIサーバーへの接続に失敗しました');
+      }
     } catch (error) {
       console.error('APIキー保存エラー:', error);
       throw error;
@@ -150,23 +139,29 @@ class BinanceService {
 
   clearApiKeys() {
     try {
-      localStorage.removeItem('binance_api_key');
-      localStorage.removeItem('binance_secret_key_encrypted');
-      localStorage.removeItem('binance_test_mode');
+      localStorage.removeItem(STORAGE_KEYS.API_KEY);
+      localStorage.removeItem(STORAGE_KEYS.SECRET_KEY);
+      localStorage.setItem(STORAGE_KEYS.TEST_MODE, 'true');
+      
       this.apiKey = null;
       this.apiSecret = null;
+      this.isTestMode = true;
+      
+      return true;
     } catch (error) {
       console.error('APIキークリアエラー:', error);
-      throw error;
+      return false;
     }
   }
 
-  // モックデータを生成
+  // モックデータをより現実的な値に更新
   generateMockData() {
+    const mockBTCAmount = (Math.random() * 0.1 + 0.05).toFixed(8); // 0.05 - 0.15 BTC
+    const mockUSDTAmount = (Math.random() * 5000 + 5000).toFixed(2); // 5000 - 10000 USDT
+    
     return {
-      USDT: { free: '1000.00', locked: '0.00' },
-      BTC: { free: '0.12345', locked: '0.00' },
-      ETH: { free: '1.2345', locked: '0.00' }
+      USDT: { free: mockUSDTAmount, locked: '0.00' },
+      BTC: { free: mockBTCAmount, locked: '0.00' }
     };
   }
 
@@ -176,12 +171,8 @@ class BinanceService {
     }
     
     try {
-      const response = await fetch(`${this.baseUrl}/time`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      return data;
+      const response = await axios.get(`${this.baseUrl}/time`);
+      return response.data;
     } catch (error) {
       console.error('サーバー時間取得エラー:', error);
       return { serverTime: Date.now() };
@@ -193,6 +184,10 @@ class BinanceService {
       if (!this.apiKey) {
         throw new Error('APIキーが設定されていません');
       }
+      
+      if (!this.apiSecret) {
+        throw new Error('APIシークレットキーが設定されていません');
+      }
 
       // テストモードの場合はモックデータを返す
       if (this.isTestMode) {
@@ -200,20 +195,21 @@ class BinanceService {
         return this.generateMockData();
       }
 
-      // 実際のAPI呼び出し（現在は無効化）
-      /*
-      const response = await fetch(`${this.baseUrl}/account`, {
+      // 実際のAPI呼び出し
+      const timestamp = Date.now();
+      const queryString = `timestamp=${timestamp}`;
+      
+      // 署名の生成
+      const signature = await generateSignature(queryString, this.apiSecret);
+      
+      const response = await axios.get(`${this.baseUrl}/account?${queryString}&signature=${signature}`, {
         headers: {
           'X-MBX-APIKEY': this.apiKey
         }
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      return data.balances.reduce((acc, balance) => {
+      // 残高のフィルタリング（残高がある通貨のみ）
+      return response.data.balances.reduce((acc, balance) => {
         if (parseFloat(balance.free) > 0 || parseFloat(balance.locked) > 0) {
           acc[balance.asset] = {
             free: balance.free,
@@ -222,13 +218,9 @@ class BinanceService {
         }
         return acc;
       }, {});
-      */
-
-      // 開発中はモックデータを返す
-      return this.generateMockData();
     } catch (error) {
       console.error('残高取得エラー:', error);
-      throw error;
+      throw new Error('APIサーバーへの接続に失敗しました: ' + (error.response?.data?.msg || error.message));
     }
   }
 
@@ -241,11 +233,8 @@ class BinanceService {
         };
       }
 
-      const response = await fetch(`${this.baseUrl}/ticker/price?symbol=${symbol}`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      return await response.json();
+      const response = await axios.get(`${this.baseUrl}/ticker/price?symbol=${symbol}`);
+      return response.data;
     } catch (error) {
       console.error('価格取得エラー:', error);
       throw error;

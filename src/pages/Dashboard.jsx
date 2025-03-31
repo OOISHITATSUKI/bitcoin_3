@@ -4,6 +4,7 @@ import { DollarSign, TrendingUp, TrendingDown, AlertTriangle, Clock, Activity, C
 import { Card, Row, Col, Button, Typography, Statistic } from 'antd';
 import { PoweroffOutlined, SyncOutlined, DollarOutlined } from '@ant-design/icons';
 import { useSystem } from '../context/SystemContext';
+import ActiveGrids from '../components/ActiveGrids';
 
 const { Title } = Typography;
 
@@ -139,7 +140,6 @@ const Dashboard = () => {
 
   const [profitHistory, setProfitHistory] = useState([]);
   const [tradeHistory, setTradeHistory] = useState([]);
-  const [activeGrids, setActiveGrids] = useState([]);
   const [systemStatus, setSystemStatus] = useState({
     isRunning: true,
     startTime: new Date(Date.now() - 72 * 60 * 60 * 1000),
@@ -152,7 +152,6 @@ const Dashboard = () => {
   useEffect(() => {
     setProfitHistory(generateProfitHistory());
     setTradeHistory(generateTradeHistory());
-    setActiveGrids(generateActiveGrids());
     
     const interval = setInterval(() => {
       setSystemStatus(prev => ({
@@ -234,41 +233,46 @@ const Dashboard = () => {
 
   return (
     <div style={{ padding: '24px' }}>
-      {/* システムステータス */}
-      <Card style={{ marginBottom: '24px' }}>
-        <Row gutter={[16, 16]} align="middle">
-          <Col span={12}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  backgroundColor: isRunning ? '#52c41a' : '#ff4d4f',
-                  marginRight: '8px'
-                }}
-              />
-              <Title level={4} style={{ margin: 0 }}>
-                {isRunning ? 'システム稼働中' : 'システム停止中'}
-              </Title>
-            </div>
-          </Col>
-          <Col span={12} style={{ textAlign: 'right' }}>
-            <Button
-              type={isRunning ? 'danger' : 'primary'}
-              icon={<PoweroffOutlined />}
-              onClick={toggleSystemStatus}
-              disabled={!isConnected}
-            >
-              {isRunning ? 'システムを停止' : 'システムを起動'}
-            </Button>
-          </Col>
-        </Row>
-      </Card>
-
-      {/* 残高情報 */}
       <Row gutter={[16, 16]}>
-        <Col span={8}>
+        <Col span={24}>
+          <ActiveGrids />
+        </Col>
+        {/* システムステータス */}
+        <Col span={12}>
+          <Card style={{ marginBottom: '24px' }}>
+            <Row gutter={[16, 16]} align="middle">
+              <Col span={12}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '50%',
+                      backgroundColor: isRunning ? '#52c41a' : '#ff4d4f',
+                      marginRight: '8px'
+                    }}
+                  />
+                  <Title level={4} style={{ margin: 0 }}>
+                    {isRunning ? 'システム稼働中' : 'システム停止中'}
+                  </Title>
+                </div>
+              </Col>
+              <Col span={12} style={{ textAlign: 'right' }}>
+                <Button
+                  type={isRunning ? 'danger' : 'primary'}
+                  icon={<PoweroffOutlined />}
+                  onClick={toggleSystemStatus}
+                  disabled={!isConnected}
+                >
+                  {isRunning ? 'システムを停止' : 'システムを起動'}
+                </Button>
+              </Col>
+            </Row>
+          </Card>
+        </Col>
+
+        {/* 残高情報 */}
+        <Col span={12}>
           <Card>
             <Statistic
               title="総資産（USDT）"
@@ -276,32 +280,6 @@ const Dashboard = () => {
               precision={2}
               prefix={<DollarOutlined />}
             />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="API接続状態"
-              value={isConnected ? '接続済み' : '未接続'}
-              valueStyle={{ color: isConnected ? '#52c41a' : '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="最終同期"
-              value={formatTimeSince(lastSyncTime)}
-              prefix={<SyncOutlined />}
-            />
-            <Button
-              type="link"
-              onClick={fetchBalances}
-              disabled={!isConnected}
-              style={{ padding: 0 }}
-            >
-              今すぐ更新
-            </Button>
           </Card>
         </Col>
       </Row>
@@ -383,132 +361,68 @@ const Dashboard = () => {
           </div>
         </div>
         
-        {/* アクティブなグリッドと取引履歴 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* アクティブなグリッド */}
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-indigo-600 px-6 py-4 flex justify-between items-center">
-              <h3 className="text-white font-medium">アクティブなグリッド</h3>
-              <span className="bg-white text-indigo-600 px-2 py-0.5 rounded text-xs font-medium">
-                {activeGrids.length} グリッド
-              </span>
-            </div>
-            <div className="p-4">
-              <div className="space-y-4">
-                {activeGrids.map(grid => (
-                  <div key={grid.id} className="border rounded-lg overflow-hidden">
-                    <div className={`px-4 py-3 flex justify-between items-center ${
-                      grid.status === 'warning' ? 'bg-amber-50' : 'bg-gray-50'
-                    }`}>
-                      <div className="flex items-center">
-                        <span className="font-medium">{grid.pair}</span>
-                        {grid.status === 'warning' && (
-                          <span className="ml-2 flex items-center text-amber-600 text-xs">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            レンジ外
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center">
-                        <span className={`text-sm font-medium ${
-                          grid.profit >= 0 ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {formatCurrency(grid.profit)}
-                        </span>
-                        <button className="ml-2 text-gray-400 hover:text-gray-600">
-                          <Eye className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="p-3 text-sm">
-                      <div className="grid grid-cols-3 gap-2 mb-2">
-                        <div>
-                          <span className="text-gray-500 text-xs">上限価格:</span>
-                          <div className="font-medium">{formatCurrency(grid.upperLimit)}</div>
-                        </div>
-                        <div>
-                          <span className="text-gray-500 text-xs">下限価格:</span>
-                          <div className="font-medium">{formatCurrency(grid.lowerLimit)}</div>
-                        </div>
-                        <div>
-                          <span className="text-gray-500 text-xs">グリッド本数:</span>
-                          <div className="font-medium">{grid.gridLines}</div>
-                        </div>
-                      </div>
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>開始: {grid.startedAt.toLocaleDateString()}</span>
-                        <span>取引回数: {grid.trades}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+        {/* 最近の取引 */}
+        <div className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div className="bg-gray-700 px-6 py-4">
+            <h3 className="text-white font-medium">最近の取引</h3>
           </div>
-          
-          {/* 最近の取引 */}
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="bg-gray-700 px-6 py-4">
-              <h3 className="text-white font-medium">最近の取引</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      時間
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      ペア
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      タイプ
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      価格
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      数量
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      損益
-                    </th>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    時間
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ペア
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    タイプ
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    価格
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    数量
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    損益
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {tradeHistory.map(trade => (
+                  <tr key={trade.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {trade.timeFormatted}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      {trade.pair}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        trade.type === 'buy' ? 
+                          'bg-green-100 text-green-800' : 
+                          'bg-red-100 text-red-800'
+                      }`}>
+                        {trade.type === 'buy' ? '買い' : '売り'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatCurrency(trade.price)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatCrypto(trade.amount, trade.pair.split('/')[0])}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className={trade.profit > 0 ? 'text-green-600' : trade.profit < 0 ? 'text-red-600' : 'text-gray-500'}>
+                        {trade.profit !== 0 ? formatCurrency(trade.profit) : '-'}
+                      </span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {tradeHistory.map(trade => (
-                    <tr key={trade.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {trade.timeFormatted}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        {trade.pair}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          trade.type === 'buy' ? 
-                            'bg-green-100 text-green-800' : 
-                            'bg-red-100 text-red-800'
-                        }`}>
-                          {trade.type === 'buy' ? '買い' : '売り'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {formatCurrency(trade.price)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {formatCrypto(trade.amount, trade.pair.split('/')[0])}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={trade.profit > 0 ? 'text-green-600' : trade.profit < 0 ? 'text-red-600' : 'text-gray-500'}>
-                          {trade.profit !== 0 ? formatCurrency(trade.profit) : '-'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

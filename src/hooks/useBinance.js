@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { binanceService } from '../services/binance';
+import { message } from 'antd';
+import CryptoJS from 'crypto-js';
 
 export const useBinance = () => {
   const [price, setPrice] = useState(null);
@@ -7,6 +9,7 @@ export const useBinance = () => {
   const [error, setError] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     // 初期化時にAPI接続状態をチェック
@@ -104,36 +107,72 @@ export const useBinance = () => {
     }
   };
   
-  // APIキーを保存
-  const saveApiKeys = async (apiKey, secretKey, isTestMode = false) => {
-    setLoading(true);
-    try {
-      await binanceService.saveApiKeys(apiKey, secretKey, isTestMode);
-      const connected = await checkApiConnection();
-      return connected;
-    } catch (err) {
-      setError(err.message);
-      return false;
-    } finally {
-      setLoading(false);
-    }
+  // APIキーのバリデーション
+  const validateApiKey = (apiKey) => {
+    // Binanceのテストネット用APIキーは64文字の英数字
+    const apiKeyPattern = /^[A-Za-z0-9]{64}$/;
+    return apiKeyPattern.test(apiKey);
   };
-  
-  // APIキーをクリア
-  const clearApiKeys = async () => {
-    setLoading(true);
+
+  // シークレットキーのバリデーション
+  const validateSecretKey = (secretKey) => {
+    // Binanceのテストネット用シークレットキーは64文字の英数字
+    const secretKeyPattern = /^[A-Za-z0-9]{64}$/;
+    return secretKeyPattern.test(secretKey);
+  };
+
+  const saveApiKeys = useCallback(async (apiKey, secretKey, isTestMode) => {
+    setIsLoading(true);
+    setError(null);
+
     try {
-      binanceService.clearApiKeys();
-      setIsConnected(false);
-      setError(null);
+      // APIキーのバリデーション
+      if (!validateApiKey(apiKey)) {
+        throw new Error('APIキーの形式が正しくありません。64文字の英数字である必要があります。');
+      }
+
+      // シークレットキーのバリデーション（マスク表示の場合はスキップ）
+      if (secretKey !== '••••••••••••••••••••••••••••••••' && !validateSecretKey(secretKey)) {
+        throw new Error('シークレットキーの形式が正しくありません。64文字の英数字である必要があります。');
+      }
+
+      // キーの暗号化と保存
+      if (secretKey !== '••••••••••••••••••••••••••••••••') {
+        const encryptedSecretKey = CryptoJS.AES.encrypt(secretKey, 'your-encryption-key').toString();
+        localStorage.setItem('binance_secret_key_encrypted', `encrypted:${encryptedSecretKey}`);
+      }
+      
+      localStorage.setItem('binance_api_key', apiKey);
+      localStorage.setItem('binance_test_mode', isTestMode.toString());
+
+      // Binanceサービスにキーを設定
+      await binanceService.saveApiKeys(apiKey, secretKey, isTestMode);
       return true;
     } catch (err) {
       setError(err.message);
       return false;
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  };
+  }, []);
+
+  const clearApiKeys = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      localStorage.removeItem('binance_api_key');
+      localStorage.removeItem('binance_secret_key_encrypted');
+      localStorage.removeItem('binance_test_mode');
+      await binanceService.clearApiKeys();
+      return true;
+    } catch (err) {
+      setError(err.message);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   return {
     price,
@@ -148,7 +187,8 @@ export const useBinance = () => {
     getPrice: binanceService.getPrice.bind(binanceService),
     getServerTime: binanceService.getServerTime.bind(binanceService),
     createWebSocket: binanceService.createWebSocket.bind(binanceService),
-    binanceService
+    binanceService,
+    isLoading
   };
 };
 
