@@ -1,7 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import { useApi } from './ApiContext';
 import { message } from 'antd';
-import { binanceService } from '../services/binance';
+import { useApi } from './ApiContext';
 
 const SYSTEM_RUNNING_KEY = 'system_running';
 const LAST_SYNC_TIME_KEY = 'last_sync_time';
@@ -13,30 +12,32 @@ export const SystemProvider = ({ children }) => {
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [balanceData, setBalanceData] = useState({});
   const [error, setError] = useState(null);
-  const [status, setStatus] = useState('停止中');
-  const { isConnected, fetchBalance } = useApi();
   const [activeGrids, setActiveGrids] = useState([]);
+  
+  // API Context から情報を取得
+  const { isConnected, fetchBalance } = useApi();
 
   // 初期化時に保存された状態を読み込む
   useEffect(() => {
-    const savedStatus = localStorage.getItem(SYSTEM_RUNNING_KEY) === 'true';
-    const savedTime = localStorage.getItem(LAST_SYNC_TIME_KEY);
-    
-    // APIに接続されていない場合は稼働状態をfalseに設定
-    const shouldRun = savedStatus && isConnected;
-    
-    setIsRunning(shouldRun);
-    localStorage.setItem(SYSTEM_RUNNING_KEY, shouldRun.toString());
-    
-    if (savedTime) {
-      setLastSyncTime(new Date(parseInt(savedTime, 10)));
+    try {
+      const savedStatus = localStorage.getItem(SYSTEM_RUNNING_KEY) === 'true';
+      const savedTime = localStorage.getItem(LAST_SYNC_TIME_KEY);
+      
+      // APIに接続されていない場合は稼働状態をfalseに設定
+      const shouldRun = savedStatus && isConnected;
+      
+      setIsRunning(shouldRun);
+      localStorage.setItem(SYSTEM_RUNNING_KEY, shouldRun.toString());
+      
+      if (savedTime) {
+        setLastSyncTime(new Date(parseInt(savedTime, 10)));
+      }
+      
+      // モックのアクティブグリッド
+      setActiveGrids(getInitialActiveGrids());
+    } catch (err) {
+      console.error('初期化エラー:', err);
     }
-    
-    // システム状態を設定
-    setStatus(shouldRun ? '稼働中' : '停止中');
-    
-    // モックのアクティブグリッド
-    setActiveGrids(getInitialActiveGrids());
   }, [isConnected]);
 
   // モックのアクティブグリッド初期データ
@@ -69,67 +70,85 @@ export const SystemProvider = ({ children }) => {
 
   // 残高情報の取得
   const fetchBalances = useCallback(async () => {
-    if (!isConnected) return;
+    if (!isConnected) {
+      setError('APIに接続されていません');
+      return;
+    }
 
     try {
-      // binanceService.getAccountInfo() の代わりに getBalance() を使用
-      const balanceData = await binanceService.getBalance();
+      // getAccountInfo の代わりに fetchBalance を使用
+      const balance = await fetchBalance();
       
-      // 残高データの整形
-      const balances = {};
-      Object.entries(balanceData).forEach(([asset, data]) => {
-        const total = parseFloat(data.free) + parseFloat(data.locked);
-        if (total > 0) {
-          balances[asset] = {
-            total,
+      if (balance) {
+        // 残高データの整形
+        const formattedBalance = {};
+        Object.entries(balance).forEach(([asset, data]) => {
+          formattedBalance[asset] = {
+            total: parseFloat(data.free) + parseFloat(data.locked),
             free: parseFloat(data.free),
             locked: parseFloat(data.locked)
           };
-        }
-      });
-      
-      setBalanceData(balances);
-      const now = new Date();
-      setLastSyncTime(now);
-      localStorage.setItem('last_sync_time', now.toISOString());
-    } catch (error) {
-      console.error('残高取得エラー:', error);
-      message.error('残高情報の取得に失敗しました');
+        });
+        
+        setBalanceData(formattedBalance);
+        const now = new Date();
+        setLastSyncTime(now);
+        localStorage.setItem(LAST_SYNC_TIME_KEY, now.getTime().toString());
+        setError(null);
+      }
+    } catch (err) {
+      console.error('残高取得エラー:', err);
+      setError('残高情報の取得に失敗しました');
     }
-  }, [binanceService, isConnected]);
+  }, [isConnected, fetchBalance]);
 
   // 定期的な残高更新
   useEffect(() => {
+    let intervalId;
+
     if (isRunning && isConnected) {
       fetchBalances(); // 初回実行
       
-      const intervalId = setInterval(() => {
+      intervalId = setInterval(() => {
         fetchBalances();
       }, 60000); // 1分ごとに更新
-      
-      return () => clearInterval(intervalId);
     }
+    
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [isRunning, isConnected, fetchBalances]);
 
-  // システム開始
+  // システム起動
   const startSystem = useCallback(async () => {
     try {
+      console.log("システム起動開始");
+      
       if (!isConnected) {
         throw new Error('APIに接続されていません');
       }
       
-      await fetchBalances(); // 初期残高取得
-      
+      // 状態を先に更新
       setIsRunning(true);
-      setStatus('稼働中');
       localStorage.setItem(SYSTEM_RUNNING_KEY, 'true');
+      
+      // 初期残高取得（失敗しても続行）
+      try {
+        await fetchBalances();
+      } catch (err) {
+        console.warn('初期残高取得エラー:', err);
+      }
       
       message.success('システムを起動しました');
       return true;
-    } catch (error) {
-      console.error('システム起動エラー:', error);
-      setError(`システムの起動に失敗しました: ${error.message}`);
-      message.error(`システムの起動に失敗しました: ${error.message}`);
+    } catch (err) {
+      console.error('システム起動エラー:', err);
+      // エラー時は状態を戻す
+      setIsRunning(false);
+      localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
+      message.error(`システムの起動に失敗しました: ${err.message}`);
       return false;
     }
   }, [isConnected, fetchBalances]);
@@ -137,52 +156,29 @@ export const SystemProvider = ({ children }) => {
   // システム停止
   const stopSystem = useCallback(() => {
     try {
+      console.log("システム停止開始");
+      
       setIsRunning(false);
-      setStatus('停止中');
       localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
       
       message.success('システムを停止しました');
       return true;
-    } catch (error) {
-      console.error('システム停止エラー:', error);
-      setError(`システムの停止に失敗しました: ${error.message}`);
-      message.error(`システムの停止に失敗しました: ${error.message}`);
+    } catch (err) {
+      console.error('システム停止エラー:', err);
+      message.error(`システムの停止に失敗しました: ${err.message}`);
       return false;
     }
   }, []);
 
   // システムの稼働状態を切り替え
-  const toggleSystemStatus = useCallback(async () => {
-    try {
-      // 現在の状態を取得
-      const newStatus = !isRunning;
-      
-      // まず状態を更新してUIに反映
-      setIsRunning(newStatus);
-      localStorage.setItem(SYSTEM_RUNNING_KEY, newStatus.toString());
-      
-      if (newStatus) {
-        // システム起動処理
-        if (!isConnected) {
-          setIsRunning(false); // 接続がなければ元に戻す
-          localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
-          throw new Error('APIに接続されていません');
-        }
-        try {
-          await fetchBalances(); // 非同期処理
-        } catch (e) {
-          console.error('残高取得エラー:', e);
-          // エラーがあっても続行
-        }
-      }
-      
-      message.success(newStatus ? 'システムを起動しました' : 'システムを停止しました');
-      return true;
-    } catch (error) {
-      message.error(`システムの${isRunning ? '停止' : '起動'}に失敗しました: ${error.message}`);
-      return false;
+  const toggleSystemStatus = useCallback(() => {
+    console.log('トグル開始:', isRunning);
+    if (isRunning) {
+      return stopSystem();
+    } else {
+      return startSystem();
     }
-  }, [isRunning, isConnected, fetchBalances]);
+  }, [isRunning, startSystem, stopSystem]);
 
   // 経過時間を計算して表示する関数
   const formatTimeSince = useCallback((date) => {
@@ -202,7 +198,6 @@ export const SystemProvider = ({ children }) => {
     balanceData,
     error,
     isConnected,
-    status,
     activeGrids,
     toggleSystemStatus,
     startSystem,
