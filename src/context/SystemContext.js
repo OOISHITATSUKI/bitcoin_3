@@ -16,7 +16,9 @@ export const SystemProvider = ({ children }) => {
   const [isInitialized, setIsInitialized] = useState(false);
   
   // API Context から情報を取得
-  const { isConnected, fetchBalance } = useApi();
+  const apiContext = useApi();
+  const isConnected = apiContext?.isConnected ?? false;
+  const fetchBalance = apiContext?.fetchBalance ?? (async () => null);
 
   // 初期化時に保存された状態を読み込む
   useEffect(() => {
@@ -215,8 +217,9 @@ export const SystemProvider = ({ children }) => {
     fetchBalances
   };
 
+  // 初期化が完了するまでローディング表示
   if (!isInitialized) {
-    return null; // またはローディングインジケータ
+    return <div>Loading...</div>;
   }
 
   return (
