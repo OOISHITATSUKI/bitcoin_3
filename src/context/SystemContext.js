@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { message } from 'antd';
 import { useApi } from './ApiContext';
+import { binanceService } from '../services/binance';
 
 const SYSTEM_RUNNING_KEY = 'system_running';
 const LAST_SYNC_TIME_KEY = 'last_sync_time';
@@ -8,6 +9,7 @@ const LAST_SYNC_TIME_KEY = 'last_sync_time';
 const SystemContext = createContext(null);
 
 export const SystemProvider = ({ children }) => {
+  // 状態の初期化
   const [isRunning, setIsRunning] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [balanceData, setBalanceData] = useState({});
@@ -16,9 +18,7 @@ export const SystemProvider = ({ children }) => {
   const [isInitialized, setIsInitialized] = useState(false);
   
   // API Context から情報を取得
-  const apiContext = useApi();
-  const isConnected = apiContext?.isConnected ?? false;
-  const fetchBalance = apiContext?.fetchBalance ?? (async () => null);
+  const { isConnected } = useApi();
 
   // 初期化時に保存された状態を読み込む
   useEffect(() => {
@@ -86,8 +86,7 @@ export const SystemProvider = ({ children }) => {
     }
 
     try {
-      // getAccountInfo の代わりに fetchBalance を使用
-      const balance = await fetchBalance();
+      const balance = await binanceService.getBalance();
       
       if (balance) {
         // 残高データの整形
@@ -110,7 +109,7 @@ export const SystemProvider = ({ children }) => {
       console.error('残高取得エラー:', err);
       setError('残高情報の取得に失敗しました');
     }
-  }, [isConnected, fetchBalance]);
+  }, [isConnected]);
 
   // 定期的な残高更新
   useEffect(() => {
