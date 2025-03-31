@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
 import { useApi } from './ApiContext';
 import { message } from 'antd';
+import { binanceService } from '../services/binance';
 
 const SYSTEM_RUNNING_KEY = 'system_running';
 const LAST_SYNC_TIME_KEY = 'last_sync_time';
@@ -68,36 +69,34 @@ export const SystemProvider = ({ children }) => {
 
   // 残高情報の取得
   const fetchBalances = useCallback(async () => {
-    if (!isConnected) {
-      setError('APIに接続されていません');
-      return;
-    }
+    if (!isConnected) return;
 
     try {
-      const balance = await fetchBalance();
-      if (balance) {
-        // 残高データの整形
-        const formattedBalance = {};
-        Object.entries(balance).forEach(([asset, data]) => {
-          formattedBalance[asset] = {
-            total: parseFloat(data.free) + parseFloat(data.locked),
+      // binanceService.getAccountInfo() の代わりに getBalance() を使用
+      const balanceData = await binanceService.getBalance();
+      
+      // 残高データの整形
+      const balances = {};
+      Object.entries(balanceData).forEach(([asset, data]) => {
+        const total = parseFloat(data.free) + parseFloat(data.locked);
+        if (total > 0) {
+          balances[asset] = {
+            total,
             free: parseFloat(data.free),
             locked: parseFloat(data.locked)
           };
-        });
-        
-        setBalanceData(formattedBalance);
-        const now = new Date();
-        setLastSyncTime(now);
-        localStorage.setItem(LAST_SYNC_TIME_KEY, now.getTime().toString());
-        setError(null);
-      }
+        }
+      });
+      
+      setBalanceData(balances);
+      const now = new Date();
+      setLastSyncTime(now);
+      localStorage.setItem('last_sync_time', now.toISOString());
     } catch (error) {
       console.error('残高取得エラー:', error);
-      setError(`残高情報の取得に失敗しました: ${error.message}`);
       message.error('残高情報の取得に失敗しました');
     }
-  }, [isConnected, fetchBalance]);
+  }, [binanceService, isConnected]);
 
   // 定期的な残高更新
   useEffect(() => {
