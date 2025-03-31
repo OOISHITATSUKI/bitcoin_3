@@ -1,6 +1,9 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import { useBinance } from '../hooks/useBinance';
+import { useApi } from './ApiContext';
 import { message } from 'antd';
+
+const SYSTEM_RUNNING_KEY = 'system_running';
+const LAST_SYNC_TIME_KEY = 'last_sync_time';
 
 const SystemContext = createContext(null);
 
@@ -8,48 +11,93 @@ export const SystemProvider = ({ children }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [balanceData, setBalanceData] = useState({});
-  const { binanceService, error, isConnected } = useBinance();
+  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('停止中');
+  const { isConnected, fetchBalance } = useApi();
+  const [activeGrids, setActiveGrids] = useState([]);
 
   // 初期化時に保存された状態を読み込む
   useEffect(() => {
-    const savedStatus = localStorage.getItem('system_running') === 'true';
-    const savedTime = localStorage.getItem('last_sync_time');
+    const savedStatus = localStorage.getItem(SYSTEM_RUNNING_KEY) === 'true';
+    const savedTime = localStorage.getItem(LAST_SYNC_TIME_KEY);
     
-    setIsRunning(savedStatus);
+    // APIに接続されていない場合は稼働状態をfalseに設定
+    const shouldRun = savedStatus && isConnected;
+    
+    setIsRunning(shouldRun);
+    localStorage.setItem(SYSTEM_RUNNING_KEY, shouldRun.toString());
+    
     if (savedTime) {
-      setLastSyncTime(new Date(savedTime));
+      setLastSyncTime(new Date(parseInt(savedTime, 10)));
     }
-  }, []);
+    
+    // システム状態を設定
+    setStatus(shouldRun ? '稼働中' : '停止中');
+    
+    // モックのアクティブグリッド
+    setActiveGrids(getInitialActiveGrids());
+  }, [isConnected]);
+
+  // モックのアクティブグリッド初期データ
+  const getInitialActiveGrids = () => [
+    {
+      id: 'grid-1',
+      symbol: 'BTC/USDT',
+      status: 'active',
+      upperPrice: 48000,
+      lowerPrice: 42000,
+      totalInvestment: 1000,
+      profitRate: 0.025,
+      totalProfit: 25.45,
+      totalLoss: 2.35,
+      gridCount: 10
+    },
+    {
+      id: 'grid-2',
+      symbol: 'ETH/USDT',
+      status: 'active',
+      upperPrice: 2500,
+      lowerPrice: 2200,
+      totalInvestment: 500,
+      profitRate: 0.012,
+      totalProfit: 6.12,
+      totalLoss: 0.98,
+      gridCount: 6
+    }
+  ];
 
   // 残高情報の取得
   const fetchBalances = useCallback(async () => {
-    if (!isConnected) return;
+    if (!isConnected) {
+      setError('APIに接続されていません');
+      return;
+    }
 
     try {
-      const accountInfo = await binanceService.getAccountInfo();
-      
-      // 残高データの整形
-      const balances = {};
-      accountInfo.balances.forEach(item => {
-        const total = parseFloat(item.free) + parseFloat(item.locked);
-        if (total > 0) {
-          balances[item.asset] = {
-            total,
-            free: parseFloat(item.free),
-            locked: parseFloat(item.locked)
+      const balance = await fetchBalance();
+      if (balance) {
+        // 残高データの整形
+        const formattedBalance = {};
+        Object.entries(balance).forEach(([asset, data]) => {
+          formattedBalance[asset] = {
+            total: parseFloat(data.free) + parseFloat(data.locked),
+            free: parseFloat(data.free),
+            locked: parseFloat(data.locked)
           };
-        }
-      });
-      
-      setBalanceData(balances);
-      const now = new Date();
-      setLastSyncTime(now);
-      localStorage.setItem('last_sync_time', now.toISOString());
+        });
+        
+        setBalanceData(formattedBalance);
+        const now = new Date();
+        setLastSyncTime(now);
+        localStorage.setItem(LAST_SYNC_TIME_KEY, now.getTime().toString());
+        setError(null);
+      }
     } catch (error) {
       console.error('残高取得エラー:', error);
+      setError(`残高情報の取得に失敗しました: ${error.message}`);
       message.error('残高情報の取得に失敗しました');
     }
-  }, [binanceService, isConnected]);
+  }, [isConnected, fetchBalance]);
 
   // 定期的な残高更新
   useEffect(() => {
@@ -64,27 +112,54 @@ export const SystemProvider = ({ children }) => {
     }
   }, [isRunning, isConnected, fetchBalances]);
 
-  // システムの稼働状態を切り替え
-  const toggleSystemStatus = useCallback(async () => {
+  // システム開始
+  const startSystem = useCallback(async () => {
     try {
-      const newStatus = !isRunning;
-      
-      if (newStatus) {
-        // システム起動処理
-        if (!isConnected) {
-          throw new Error('APIに接続されていません');
-        }
-        await fetchBalances(); // 初期残高取得
+      if (!isConnected) {
+        throw new Error('APIに接続されていません');
       }
       
-      setIsRunning(newStatus);
-      localStorage.setItem('system_running', newStatus.toString());
+      await fetchBalances(); // 初期残高取得
       
-      message.success(newStatus ? 'システムを起動しました' : 'システムを停止しました');
+      setIsRunning(true);
+      setStatus('稼働中');
+      localStorage.setItem(SYSTEM_RUNNING_KEY, 'true');
+      
+      message.success('システムを起動しました');
+      return true;
     } catch (error) {
-      message.error(`システムの${isRunning ? '停止' : '起動'}に失敗しました: ${error.message}`);
+      console.error('システム起動エラー:', error);
+      setError(`システムの起動に失敗しました: ${error.message}`);
+      message.error(`システムの起動に失敗しました: ${error.message}`);
+      return false;
     }
-  }, [isRunning, isConnected, fetchBalances]);
+  }, [isConnected, fetchBalances]);
+
+  // システム停止
+  const stopSystem = useCallback(() => {
+    try {
+      setIsRunning(false);
+      setStatus('停止中');
+      localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
+      
+      message.success('システムを停止しました');
+      return true;
+    } catch (error) {
+      console.error('システム停止エラー:', error);
+      setError(`システムの停止に失敗しました: ${error.message}`);
+      message.error(`システムの停止に失敗しました: ${error.message}`);
+      return false;
+    }
+  }, []);
+
+  // システムの稼働状態を切り替え
+  const toggleSystemStatus = useCallback(() => {
+    if (isRunning) {
+      return stopSystem();
+    } else {
+      return startSystem();
+    }
+  }, [isRunning, startSystem, stopSystem]);
 
   // 経過時間を計算して表示する関数
   const formatTimeSince = useCallback((date) => {
@@ -104,7 +179,11 @@ export const SystemProvider = ({ children }) => {
     balanceData,
     error,
     isConnected,
+    status,
+    activeGrids,
     toggleSystemStatus,
+    startSystem,
+    stopSystem,
     formatTimeSince,
     fetchBalances
   };
