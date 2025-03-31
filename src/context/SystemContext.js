@@ -153,13 +153,37 @@ export const SystemProvider = ({ children }) => {
   }, []);
 
   // システムの稼働状態を切り替え
-  const toggleSystemStatus = useCallback(() => {
-    if (isRunning) {
-      return stopSystem();
-    } else {
-      return startSystem();
+  const toggleSystemStatus = useCallback(async () => {
+    try {
+      // 現在の状態を取得
+      const newStatus = !isRunning;
+      
+      // まず状態を更新してUIに反映
+      setIsRunning(newStatus);
+      localStorage.setItem(SYSTEM_RUNNING_KEY, newStatus.toString());
+      
+      if (newStatus) {
+        // システム起動処理
+        if (!isConnected) {
+          setIsRunning(false); // 接続がなければ元に戻す
+          localStorage.setItem(SYSTEM_RUNNING_KEY, 'false');
+          throw new Error('APIに接続されていません');
+        }
+        try {
+          await fetchBalances(); // 非同期処理
+        } catch (e) {
+          console.error('残高取得エラー:', e);
+          // エラーがあっても続行
+        }
+      }
+      
+      message.success(newStatus ? 'システムを起動しました' : 'システムを停止しました');
+      return true;
+    } catch (error) {
+      message.error(`システムの${isRunning ? '停止' : '起動'}に失敗しました: ${error.message}`);
+      return false;
     }
-  }, [isRunning, startSystem, stopSystem]);
+  }, [isRunning, isConnected, fetchBalances]);
 
   // 経過時間を計算して表示する関数
   const formatTimeSince = useCallback((date) => {
