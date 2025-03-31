@@ -13,31 +13,39 @@ export const SystemProvider = ({ children }) => {
   const [balanceData, setBalanceData] = useState({});
   const [error, setError] = useState(null);
   const [activeGrids, setActiveGrids] = useState([]);
+  const [isInitialized, setIsInitialized] = useState(false);
   
   // API Context から情報を取得
   const { isConnected, fetchBalance } = useApi();
 
   // 初期化時に保存された状態を読み込む
   useEffect(() => {
-    try {
-      const savedStatus = localStorage.getItem(SYSTEM_RUNNING_KEY) === 'true';
-      const savedTime = localStorage.getItem(LAST_SYNC_TIME_KEY);
-      
-      // APIに接続されていない場合は稼働状態をfalseに設定
-      const shouldRun = savedStatus && isConnected;
-      
-      setIsRunning(shouldRun);
-      localStorage.setItem(SYSTEM_RUNNING_KEY, shouldRun.toString());
-      
-      if (savedTime) {
-        setLastSyncTime(new Date(parseInt(savedTime, 10)));
+    const initializeSystem = async () => {
+      try {
+        const savedStatus = localStorage.getItem(SYSTEM_RUNNING_KEY) === 'true';
+        const savedTime = localStorage.getItem(LAST_SYNC_TIME_KEY);
+        
+        // APIに接続されていない場合は稼働状態をfalseに設定
+        const shouldRun = savedStatus && isConnected;
+        
+        setIsRunning(shouldRun);
+        localStorage.setItem(SYSTEM_RUNNING_KEY, shouldRun.toString());
+        
+        if (savedTime) {
+          setLastSyncTime(new Date(parseInt(savedTime, 10)));
+        }
+        
+        // モックのアクティブグリッド
+        setActiveGrids(getInitialActiveGrids());
+        
+        setIsInitialized(true);
+      } catch (err) {
+        console.error('初期化エラー:', err);
+        setError('システムの初期化に失敗しました');
       }
-      
-      // モックのアクティブグリッド
-      setActiveGrids(getInitialActiveGrids());
-    } catch (err) {
-      console.error('初期化エラー:', err);
-    }
+    };
+
+    initializeSystem();
   }, [isConnected]);
 
   // モックのアクティブグリッド初期データ
@@ -199,12 +207,17 @@ export const SystemProvider = ({ children }) => {
     error,
     isConnected,
     activeGrids,
+    isInitialized,
     toggleSystemStatus,
     startSystem,
     stopSystem,
     formatTimeSince,
     fetchBalances
   };
+
+  if (!isInitialized) {
+    return null; // またはローディングインジケータ
+  }
 
   return (
     <SystemContext.Provider value={value}>
