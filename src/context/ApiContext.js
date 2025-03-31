@@ -3,43 +3,11 @@ import { binanceService } from '../services/binance';
 import { message } from 'antd';
 import { useBinance } from '../hooks/useBinance';
 
-// 互換性のために古いキーも定義
-const LEGACY_API_CONNECTED_KEYS = [
-  'crypto_bot_api_connected',
-  'binance_api_connected',
-  'is_api_connected'
-];
-
+// API接続ステータスのローカルストレージキー
 const API_CONNECTED_KEY = 'api_connected';
 const LAST_SYNC_TIME_KEY = 'last_sync_time';
-const API_KEY_STORAGE_KEY = 'binance_api_key';
-const API_SECRET_STORAGE_KEY = 'binance_secret_key_encrypted';
 
 const ApiContext = createContext();
-
-// 接続状態を取得する関数
-const getStoredConnectionState = () => {
-  // メインのキーをチェック
-  if (localStorage.getItem(API_CONNECTED_KEY) === 'true') {
-    return true;
-  }
-  
-  // 古いキーをチェック
-  return LEGACY_API_CONNECTED_KEYS.some(key => 
-    localStorage.getItem(key) === 'true'
-  );
-};
-
-// 接続状態を設定する関数
-const setStoredConnectionState = (connected) => {
-  // メインのキーを設定
-  localStorage.setItem(API_CONNECTED_KEY, connected.toString());
-  
-  // 互換性のために古いキーも設定
-  LEGACY_API_CONNECTED_KEYS.forEach(key => {
-    localStorage.setItem(key, connected.toString());
-  });
-};
 
 export const useApi = () => {
   const context = useContext(ApiContext);
@@ -51,41 +19,154 @@ export const useApi = () => {
 
 export const ApiProvider = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState(null);
   const [balance, setBalance] = useState(null);
-  const [lastSync, setLastSync] = useState(null);
-
-  const { price, loading, error: binanceError, getPrice, getBalance } = useBinance();
+  const [lastSyncTime, setLastSyncTime] = useState(null);
 
   // APIキーの読み込みと接続確認
   useEffect(() => {
-    const checkConnection = async () => {
+    const initializeApi = async () => {
       try {
+        setIsChecking(true);
         const hasKeys = await binanceService.loadApiKeys();
         if (hasKeys) {
           const serverTime = await binanceService.getServerTime();
           if (serverTime) {
             setIsConnected(true);
-            setError(null);
+            localStorage.setItem(API_CONNECTED_KEY, 'true');
+            
+            // 保存された最終同期時間があれば読み込む
+            const savedLastSync = localStorage.getItem(LAST_SYNC_TIME_KEY);
+            if (savedLastSync) {
+              setLastSyncTime(new Date(parseInt(savedLastSync)));
+            }
+            
+            // 初期残高を取得
+            fetchBalance();
+          } else {
+            setIsConnected(false);
+            localStorage.setItem(API_CONNECTED_KEY, 'false');
           }
+        } else {
+          setIsConnected(false);
+          localStorage.setItem(API_CONNECTED_KEY, 'false');
         }
       } catch (err) {
-        setError('API接続エラー: ' + err.message);
+        console.error('API初期化エラー:', err);
+        setError(err.message);
         setIsConnected(false);
+        localStorage.setItem(API_CONNECTED_KEY, 'false');
+      } finally {
+        setIsChecking(false);
       }
     };
 
-    checkConnection();
+    initializeApi();
   }, []);
+
+  // 残高を取得する関数
+  const fetchBalance = async () => {
+    if (!isConnected) return;
+    
+    try {
+      setIsChecking(true);
+      const balanceData = await binanceService.getBalance();
+      setBalance(balanceData);
+      
+      const now = Date.now();
+      setLastSyncTime(new Date(now));
+      localStorage.setItem(LAST_SYNC_TIME_KEY, now.toString());
+      
+      setError(null);
+      return balanceData;
+    } catch (err) {
+      console.error('残高取得エラー:', err);
+      setError(`残高取得エラー: ${err.message}`);
+      return null;
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  // API接続状態を確認
+  const checkApiConnection = async () => {
+    try {
+      setIsChecking(true);
+      const serverTime = await binanceService.getServerTime();
+      const connected = !!serverTime;
+      
+      setIsConnected(connected);
+      localStorage.setItem(API_CONNECTED_KEY, connected.toString());
+      
+      if (connected) {
+        setError(null);
+        fetchBalance();
+      } else {
+        setError('APIに接続できませんでした');
+      }
+      
+      return connected;
+    } catch (err) {
+      console.error('API接続確認エラー:', err);
+      setIsConnected(false);
+      localStorage.setItem(API_CONNECTED_KEY, 'false');
+      setError(`API接続エラー: ${err.message}`);
+      return false;
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  // APIキーを保存
+  const saveApiKeys = async (apiKey, secretKey, isTestMode = false) => {
+    try {
+      setIsChecking(true);
+      
+      await binanceService.saveApiKeys(apiKey, secretKey, isTestMode);
+      const connected = await checkApiConnection();
+      
+      if (connected) {
+        message.success('APIキーを保存しました');
+        await fetchBalance();
+      } else {
+        message.error('APIキーを保存しましたが、接続できませんでした');
+      }
+      
+      return connected;
+    } catch (err) {
+      console.error('APIキー保存エラー:', err);
+      setError(`APIキー保存エラー: ${err.message}`);
+      message.error(`APIキー保存エラー: ${err.message}`);
+      return false;
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  // APIキーをクリア
+  const clearApiKeys = () => {
+    try {
+      binanceService.clearApiKeys();
+      setIsConnected(false);
+      setBalance(null);
+      setError(null);
+      localStorage.setItem(API_CONNECTED_KEY, 'false');
+      message.success('API設定をクリアしました');
+      return true;
+    } catch (err) {
+      console.error('APIキークリアエラー:', err);
+      setError(`APIキークリアエラー: ${err.message}`);
+      message.error(`APIキークリアエラー: ${err.message}`);
+      return false;
+    }
+  };
 
   // 定期的な残高更新
   useEffect(() => {
     let intervalId;
 
     if (isConnected) {
-      // 初回の残高取得
-      fetchBalance();
-
       // 30秒ごとに残高を更新
       intervalId = setInterval(fetchBalance, 30000);
     }
@@ -102,7 +183,6 @@ export const ApiProvider = ({ children }) => {
     const handleVisibilityChange = () => {
       if (!document.hidden && isConnected) {
         checkApiConnection();
-        fetchBalance();
       }
     };
 
@@ -113,67 +193,22 @@ export const ApiProvider = ({ children }) => {
     };
   }, [isConnected]);
 
-  const checkApiConnection = async () => {
+  // 価格を取得
+  const getPrice = useCallback(async (symbol = 'BTCUSDT') => {
     try {
-      const serverTime = await binanceService.getServerTime();
-      const isConnected = !!serverTime;
-      setIsConnected(isConnected);
-      setError(null);
-      return isConnected;
-    } catch (error) {
-      console.error('API接続チェックエラー:', error);
-      setIsConnected(false);
-      setError(error.message);
-      return false;
+      return await binanceService.getPrice(symbol);
+    } catch (err) {
+      console.error('価格取得エラー:', err);
+      return null;
     }
-  };
-
-  const fetchBalance = async () => {
-    try {
-      const balanceData = await getBalance();
-      setBalance(balanceData);
-      setLastSync(new Date());
-      setError(null);
-    } catch (error) {
-      console.error('残高取得エラー:', error);
-      setError(error.message);
-    }
-  };
-
-  const saveApiKeys = async (apiKey, secretKey, isTestMode = false) => {
-    try {
-      await binanceService.saveApiKeys(apiKey, secretKey, isTestMode);
-      const connected = await checkApiConnection();
-      if (connected) {
-        await fetchBalance();
-      }
-      return connected;
-    } catch (error) {
-      console.error('APIキー保存エラー:', error);
-      setError(error.message);
-      return false;
-    }
-  };
-
-  const clearApiKeys = () => {
-    try {
-      binanceService.clearApiKeys();
-      setIsConnected(false);
-      setBalance(null);
-      setError(null);
-      return true;
-    } catch (error) {
-      console.error('APIキークリアエラー:', error);
-      setError(error.message);
-      return false;
-    }
-  };
+  }, []);
 
   const value = {
     isConnected,
+    isChecking,
     error,
     balance,
-    lastSync,
+    lastSyncTime,
     checkApiConnection,
     fetchBalance,
     saveApiKeys,
