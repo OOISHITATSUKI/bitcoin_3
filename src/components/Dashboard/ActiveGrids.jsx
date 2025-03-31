@@ -1,14 +1,12 @@
 import React from 'react';
 import { Card, Typography, Tag, Space, Button, Row, Col } from 'antd';
 import { useSystem } from '../../context/SystemContext';
-import { useBinance } from '../../hooks/useBinance';
 import { ArrowUpRight, ArrowDownRight, DollarSign, Percent } from 'lucide-react';
 
 const { Title, Text } = Typography;
 
 const ActiveGrids = () => {
   const { activeGrids } = useSystem();
-  const { getPrice } = useBinance();
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('ja-JP', {
