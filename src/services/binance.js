@@ -315,6 +315,54 @@ class BinanceService {
 
     return mockWs;
   }
+
+  async getAccountInfo() {
+    try {
+      if (!this.apiKey) {
+        throw new Error('APIキーが設定されていません');
+      }
+
+      // テストモードの場合はモックデータを返す
+      if (this.isTestMode) {
+        return {
+          makerCommission: 10,
+          takerCommission: 10,
+          buyerCommission: 0,
+          sellerCommission: 0,
+          canTrade: true,
+          canWithdraw: false,
+          canDeposit: false,
+          updateTime: Date.now(),
+          accountType: "SPOT",
+          balances: [
+            { asset: "BTC", free: "0.12345", locked: "0.00000" },
+            { asset: "ETH", free: "1.23456", locked: "0.00000" },
+            { asset: "USDT", free: "1000.00", locked: "0.00000" }
+          ]
+        };
+      }
+
+      // 実際のAPI呼び出し
+      const timestamp = Date.now();
+      const queryString = `timestamp=${timestamp}`;
+      const signature = await this.generateSignature(queryString, this.apiSecret);
+      
+      const response = await fetch(`${this.baseUrl}/account?${queryString}&signature=${signature}`, {
+        headers: {
+          'X-MBX-APIKEY': this.apiKey
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('アカウント情報取得エラー:', error);
+      throw error;
+    }
+  }
 }
 
 // シングルトンインスタンスを作成してエクスポート
